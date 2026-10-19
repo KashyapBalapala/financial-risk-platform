@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: risk-platform-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: risk_platform
+      POSTGRES_USER: risk_app
+      POSTGRES_PASSWORD: local_dev_only
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U risk_app -d risk_platform"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:

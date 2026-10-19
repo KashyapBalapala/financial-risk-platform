@@ -1,36 +1,78 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# RiskLens local development
 
-## Getting Started
+RiskLens accepts transactions, evaluates configured risk rules, and presents
+generated alerts to authenticated investigators.
 
-First, run the development server:
+## Prerequisites
+
+- Node.js 22.6 or newer
+- npm
+- Docker with Compose
+- OpenSSL
+
+## Bootstrap
+
+Install dependencies and create a local environment file:
+
+```bash
+npm ci
+cp .env.example .env
+```
+
+Generate `BETTER_AUTH_SECRET` and `TRANSACTION_INGESTION_TOKEN` independently
+with `openssl rand -hex 32`, then replace their placeholders in `.env`. Do not
+commit `.env` or the generated values. The provided `DATABASE_URL` matches the
+local PostgreSQL service in `compose.yaml`, and `BETTER_AUTH_URL` matches the
+development server on port 3002.
+
+Start PostgreSQL, apply the schema migrations, and seed the required development
+risk rule:
+
+```bash
+docker compose up -d
+npm run db:migrate
+npm run db:seed:dev
+```
+
+The seed command creates `HIGH_VALUE_USD` only when it is absent. Re-running it
+is a no-op when the existing rule matches. It exits unsuccessfully without
+changing the row if the same code has different settings.
+
+Provision an investigator in an interactive terminal:
+
+```bash
+npm run auth:provision -- --email investigator@example.com --name "Ada Lovelace"
+```
+
+Start RiskLens at [http://localhost:3002](http://localhost:3002):
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Demonstrate alert generation
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+In another terminal, load the local environment without printing its values and
+submit a transaction above the seeded threshold:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+set -a
+. ./.env
+set +a
+IDEMPOTENCY_KEY="demo-high-value-$(date +%s)"
+curl --fail-with-body \
+  -X POST http://localhost:3002/api/transactions \
+  -H "Authorization: Bearer ${TRANSACTION_INGESTION_TOKEN}" \
+  -H "Content-Type: application/json" \
+  --data "{
+    \"idempotencyKey\": \"${IDEMPOTENCY_KEY}\",
+    \"accountReference\": \"demo-account-001\",
+    \"amount\": \"12500.00\",
+    \"currency\": \"USD\",
+    \"transactionType\": \"TRANSFER\"
+  }"
+```
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The response should include one alert with rule code `HIGH_VALUE_USD`. Sign in
+at [http://localhost:3002/login](http://localhost:3002/login) with the
+provisioned investigator to inspect and update the alert.
